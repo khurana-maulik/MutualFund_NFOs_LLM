@@ -1,0 +1,52 @@
+[
+  {
+    "question": "What is the investment objective of the fund?",
+    "ground_truth": "The investment objective is typically to provide capital appreciation or income by investing in equity, debt, or hybrid instruments as described in the fund's objective section.",
+    "expected_pages": [4, 5, 6]
+  },
+  {
+    "question": "What is the exit load?",
+    "ground_truth": "Exit load is typically 1% if redeemed within 1 year, and nil thereafter. Exact percentages vary by fund.",
+    "expected_pages": [30, 31]
+  },
+  {
+    "question": "What are the main risk factors?",
+    "ground_truth": "Risk factors include market risk, liquidity risk, interest rate risk (for debt funds), and concentration risk. These are detailed in the Risk Factors section.",
+    "expected_pages": [15, 16, 17, 18]
+  },
+  {
+    "question": "Who is the fund manager?",
+    "ground_truth": "The fund manager's name, experience, and qualifications are listed in the Fund Management section.",
+    "expected_pages": [8, 9]
+  },
+  {
+    "question": "What is the expense ratio?",
+    "ground_truth": "The expense ratio is capped as per SEBI regulations (typically 2.25% for equity funds, 2.00% for debt funds). The actual ratio is disclosed in the Fees and Expenses section.",
+    "expected_pages": [28, 29]
+  },
+  {
+    "question": "What is the minimum investment amount?",
+    "ground_truth": "Minimum investment is typically Rs. 5,000 for lump sum and Rs. 500 for SIP. Some funds may have different minimums.",
+    "expected_pages": [25, 26]
+  },
+  {
+    "question": "What is the NAV calculation method?",
+    "ground_truth": "NAV is calculated by dividing the net assets of the scheme by the number of units outstanding. It is calculated daily on business days.",
+    "expected_pages": [23, 24]
+  },
+  {
+    "question": "What is the lock-in period?",
+    "ground_truth": "ELSS funds have 3-year lock-in, while other open-ended funds typically have no lock-in (but may have exit loads).",
+    "expected_pages": [30, 31]
+  },
+  {
+    "question": "What is the benchmark index?",
+    "ground_truth": "The benchmark varies by fund type - e.g., Nifty 50 for large-cap equity, Nifty 500 for multicap, CRISIL indices for debt.",
+    "expected_pages": [6, 7]
+  },
+  {
+    "question": "What is the asset allocation strategy?",
+    "ground_truth": "Asset allocation defines the % of portfolio in equity, debt, and other instruments. This varies by fund category (e.g., 80-100% equity for equity funds).",
+    "expected_pages": [10, 11, 12]
+  }
+]

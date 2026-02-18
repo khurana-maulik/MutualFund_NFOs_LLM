@@ -1,0 +1,26 @@
+# Core
+streamlit
+python-dotenv
+
+# LangChain
+langchain
+langchain-community
+langchain-google-genai
+langchain-text-splitters
+langchain-ollama
+
+# Vector DB (FAISS — works with Python 3.14, no pydantic v1 issues)
+faiss-cpu
+
+# Retrieval & Re-ranking
+rank-bm25  # For hybrid search (BM25 + semantic)
+
+# PDF Parsing
+PyMuPDF
+pdfplumber
+
+# Embeddings & Re-ranking
+sentence-transformers  # For local embeddings + cross-encoder re-ranking
+
+# Google AI
+google-generativeai
