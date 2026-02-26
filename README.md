@@ -1,71 +1,101 @@
-# 🏦 SID Chatbot — RAG for Financial Document Analysis
+# 🏦 SID Chatbot — Mutual Fund Intelligence Platform
 
 [![Python](https://img.shields.io/badge/Python-3.13%2B-blue.svg)](https://www.python.org/)
 [![LangChain](https://img.shields.io/badge/LangChain-Latest-green.svg)](https://www.langchain.com/)
-[![Ollama](https://img.shields.io/badge/LLM-Ollama%20qwen2.5-orange.svg)](https://ollama.ai/)
+[![Groq](https://img.shields.io/badge/LLM-Groq%20Llama%203.3%2070B-orange.svg)](https://groq.com/)
+[![AMFI](https://img.shields.io/badge/Data-AMFI%20India-purple.svg)](https://amfiindia.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> Intelligent chatbot using Retrieval-Augmented Generation (RAG) to help investors quickly understand mutual fund Scheme Information Documents (SIDs).
+> AI-powered mutual fund analysis platform that scrapes data from **14,000+ Indian mutual funds**, builds a searchable knowledge base, and lets you chat with fund data using RAG (Retrieval-Augmented Generation).
 
-## 🎯 Problem Statement
+---
 
-Mutual fund SIDs are dense, 100+ page legal documents containing critical investment information. Investors spend hours manually searching for specific details like:
-- Investment objectives
-- Risk factors
-- Expense ratios and loads
-- Fund manager credentials
-- Asset allocation strategies
+## 🎯 What It Does
 
-**Time wasted:** 2-3 hours per document analysis ⏱️
+Instead of manually reading 100+ page SID documents, this platform:
 
-## ✨ Solution
+1. **Scrapes** daily NAV data for **14,287 schemes** from AMFI India
+2. **Enriches** each fund with returns, category, and metadata via mfapi.in
+3. **Indexes** everything in a FAISS vector store for instant semantic search
+4. **Answers** your questions using Groq's ultra-fast Llama 3.3 70B model
+5. **Shows** confidence scores, source citations, and fund info at a glance
 
-An intelligent chatbot that:
-- ✅ Answers questions about SIDs in **<3 seconds**
-- ✅ Provides **page citations** for every answer
-- ✅ Shows **confidence scores** (HIGH/MEDIUM/LOW)
-- ✅ Works **100% locally** (zero API costs, private)
-- ✅ Handles both **narrative text and tables**
-
-**Time saved:** From 2+ hours → 2 minutes ⚡
+**Time saved:** From hours of reading PDFs → instant answers ⚡
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-PDF Upload → Parse (PyMuPDF + pdfplumber) → Chunk → Embed (384-dim vectors)
-                                                          ↓
-User Question → Hybrid Search (BM25 + FAISS) → Re-rank (Cross-Encoder)
-                                                          ↓
-                Top-5 Chunks → Prompt + Ollama qwen2.5 → Answer + Citations + Confidence
+                          ┌─────────────────────────────────────┐
+                          │        DATA INGESTION PIPELINE       │
+                          │                                     │
+ AMFI NAVAll.txt ────────►│  scrape_nav.py      ────► SQLite   │
+ (14,287 funds)           │                           (funds.db)│
+                          │                                     │
+ mfapi.in API ───────────►│  scrape_scheme_details.py           │
+ (returns + metadata)     │       │                             │
+                          │       ▼                             │
+                          │  Text Documents (data/fund_texts/)  │
+                          │       │                             │
+                          │       ▼                             │
+                          │  ingest_funds.py  ────► FAISS Index │
+                          └─────────────────────────────────────┘
+                                        │
+                                        ▼
+                          ┌─────────────────────────────────────┐
+                          │          STREAMLIT APP (app.py)      │
+                          │                                     │
+                          │  AMC Dropdown ──► Fund Selector     │
+                          │       │                             │
+                          │       ▼                             │
+                          │  Fund Info Card (NAV, category...)  │
+                          │       │                             │
+                          │       ▼                             │
+                          │  User Question                      │
+                          │       │                             │
+                          │       ▼                             │
+                          │  Hybrid Search (BM25 + FAISS)       │
+                          │       │                             │
+                          │       ▼                             │
+                          │  Re-Rank (Cross-Encoder)            │
+                          │       │                             │
+                          │       ▼                             │
+                          │  Groq (Llama 3.3 70B) ──► Answer   │
+                          │       + Citations + Confidence      │
+                          └─────────────────────────────────────┘
 ```
 
-### Key Components
+### Tech Stack
 
 | Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Frontend** | Streamlit | Clean chat UI |
-| **PDF Parsing** | PyMuPDF + pdfplumber | Extract text + tables |
-| **Chunking** | RecursiveCharacterTextSplitter | 1000-char chunks, 200 overlap |
+|-----------|-----------|---------| 
+| **Frontend** | Streamlit | Fund selector + chat UI |
+| **Database** | SQLite | Structured fund metadata (14K+ schemes) |
+| **LLM** | Groq + Llama 3.3 70B | Ultra-fast cloud inference |
 | **Embeddings** | `all-MiniLM-L6-v2` (local) | 384-dim semantic vectors |
 | **Vector DB** | FAISS (Meta AI) | Fast similarity search |
 | **Retrieval** | BM25 + FAISS hybrid | Keyword + semantic matching |
 | **Re-ranking** | `ms-marco-MiniLM-L-6-v2` | Cross-encoder precision |
-| **LLM** | Ollama qwen2.5 | Local text generation |
+| **Data Source** | AMFI India + mfapi.in | NAV, returns, scheme details |
+| **PDF Parsing** | PyMuPDF + pdfplumber | Optional SID PDF ingestion |
 
 ---
 
-## 📊 Performance Metrics
+## 📊 Data Coverage
 
-| Metric | Value | Details |
-|--------|-------|---------|
-| **Retrieval Accuracy** | **80%+** | Hybrid search + re-ranking |
-| **Query Latency** | **<3 seconds** | Including retrieval + generation |
-| **Document Size** | **100+ pages** | Handles complex financial docs |
-| **Chunks Processed** | **500+** | Per typical SID |
-| **Operational Cost** | **$0** | 100% local processing |
-| **Confidence Scoring** | **3-tier** | HIGH/MEDIUM/LOW with scores |
+| Metric | Value |
+|--------|-------|
+| **Total Schemes in DB** | 14,287 |
+| **Enriched with Returns** | 5,500+ |
+| **AMCs Tracked** | 37 (all major Indian fund houses) |
+| **Data Points per Fund** | NAV, 1M/3M/6M/1Y/3Y/5Y returns, category, type |
+| **Data Source** | AMFI India (official) + mfapi.in (free API) |
+| **Update Frequency** | On-demand (run scraper anytime) |
+
+### AMCs Covered (Top Tier)
+
+SBI · ICICI Prudential · HDFC · Nippon India · Kotak Mahindra · Aditya Birla Sun Life · UTI · Axis · Mirae Asset · DSP · Franklin Templeton · Tata · Bandhan · Motilal Oswal · Edelweiss · Canara Robeco · HSBC · Baroda BNP Paribas · LIC · Quant · PPFAS · Sundaram · Bajaj Finserv · and more...
 
 ---
 
@@ -73,8 +103,8 @@ User Question → Hybrid Search (BM25 + FAISS) → Re-rank (Cross-Encoder)
 
 ### Prerequisites
 - Python 3.13+
-- 8GB RAM minimum
-- Windows/Linux/Mac
+- 4GB RAM minimum
+- Internet connection (for Groq API + initial data scraping)
 
 ### Installation
 
@@ -83,77 +113,116 @@ User Question → Hybrid Search (BM25 + FAISS) → Re-rank (Cross-Encoder)
 git clone https://github.com/yourusername/sid-chatbot.git
 cd sid-chatbot
 
-# 2. Install Python dependencies
+# 2. Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/Mac
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 3. Install Ollama (one-time)
-# Windows: winget install Ollama.Ollama
-# Mac: brew install ollama
-# Linux: curl -fsSL https://ollama.com/install.sh | sh
+# 4. Set up API key
+# Create .env file with your Groq API key (free at https://console.groq.com)
+echo "GROQ_API_KEY=your_key_here" > .env
+```
 
-# 4. Pull qwen2.5 model (one-time)
-ollama pull qwen2.5
+### Data Setup (One-Time)
 
-# 5. Run the app
+```bash
+# On Windows, set encoding first:
+$env:PYTHONIOENCODING='utf-8'
+
+# Step 1: Scrape all NAV data from AMFI (~14K funds, takes ~2 seconds)
+python -m scripts.scrape_nav
+
+# Step 2: Enrich funds with returns data (adjust limit as needed)
+python -m scripts.scrape_scheme_details --limit 5000 --delay 0.3
+
+# Step 3: Build the FAISS vector store
+python -m scripts.ingest_funds --texts-only
+```
+
+### Launch
+
+```bash
 streamlit run app.py
 ```
 
-### Usage
+Open **http://localhost:8501** → Select an AMC → Pick a fund → Ask questions!
 
-1. **Upload SID PDF** via sidebar
-2. **Wait 1-2 minutes** for processing (first time downloads models)
-3. **Ask questions** like:
-   - "What is the exit load?"
-   - "What are the risk factors?"
-   - "Who is the fund manager?"
-4. **View answers** with page citations and confidence scores
+---
+
+## 💡 Usage
+
+### Asking Questions
+
+Select a fund from the sidebar, then ask:
+
+| Question | What You Get |
+|----------|-------------|
+| "What is the NAV?" | Current NAV with date |
+| "What are the returns?" | 1M, 3M, 6M, 1Y, 3Y, 5Y returns |
+| "What category is this fund?" | Scheme category and type |
+| "Compare the performance" | Returns data with confidence scoring |
+
+### Fund Info Card
+
+Every selected fund shows a live info card with:
+- 💰 **Current NAV** with date
+- 📂 **Category** (Equity, Debt, Hybrid, etc.)
+- 📊 **Scheme Type** (Open/Close ended)
+- 🏦 **AMC Name** and scheme code
+
+### Confidence Scoring
+
+Every answer includes a confidence level:
+- 🟢 **HIGH** (≥0.7) — Strong match, reliable answer
+- 🟡 **MEDIUM** (0.4–0.7) — Moderate relevance
+- 🔴 **LOW** (<0.4) — Weak match or uncertain
 
 ---
 
 ## 🎓 Technical Deep Dive
 
-### 1. Hybrid Search
+### 1. Data Pipeline
 
-Combines two complementary retrieval methods:
+```
+AMFI NAVAll.txt ──parse──► SQLite (14K+ schemes)
+                              │
+mfapi.in/{code} ──enrich──► fund_texts/*.txt (with returns)
+                              │
+                     chunk + embed
+                              │
+                              ▼
+                        FAISS Index (vectorstore/)
+```
 
-**BM25 (Keyword-based):**
-- Scores based on term frequency (TF) and inverse document frequency (IDF)
-- Excellent for exact phrase matching ("exit load" → finds "exit load")
+**NAV Parser:** Reads AMFI's semicolon-delimited text file, extracts scheme code, ISIN, name, NAV, date, fund house, and category for every active scheme.
 
-**FAISS (Semantic):**
-- Vector similarity using sentence embeddings
-- Finds conceptually similar content ("exit load" → "redemption charges")
+**Enricher:** Calls mfapi.in for each scheme, calculates returns from NAV history (1M, 3M, 6M, 1Y, 3Y, 5Y CAGR), and saves structured text documents.
 
-**Merging:** `0.5 * BM25_score + 0.5 * FAISS_score` → Best of both worlds
+**Ingestion:** Chunks text documents using `RecursiveCharacterTextSplitter`, embeds with `all-MiniLM-L6-v2`, and stores in FAISS with fund metadata.
 
-### 2. Re-Ranking with Cross-Encoder
+### 2. Hybrid Search
 
-**Why?** Bi-encoders (FAISS) encode question/chunks independently. Cross-encoders see both together → more accurate.
+Combines two retrieval methods for maximum accuracy:
 
-**Pipeline:**
-1. Hybrid search retrieves **10 candidates**
-2. Cross-encoder scores each (question, chunk) pair
-3. Keep **top-5** most relevant
-4. Send to LLM
+| Method | Strength | Example |
+|--------|----------|---------|
+| **BM25** (keyword) | Exact phrases | "exit load" → finds "exit load" |
+| **FAISS** (semantic) | Concept matching | "exit load" → finds "redemption charges" |
 
-**Model:** `cross-encoder/ms-marco-MiniLM-L-6-v2` (trained on MS MARCO dataset)
+Merged with equal weights: `0.5 × BM25 + 0.5 × FAISS`
 
-### 3. Confidence Scoring
+### 3. Re-Ranking
 
-Calculated from:
-- **Average re-ranker score** of top-3 chunks
-- **LLM uncertainty detection** ("could not find...", "information not available")
-
-**Classification:**
-- 🟢 **HIGH** (≥0.7): Strong match, reliable answer
-- 🟡 **MEDIUM** (0.4-0.7): Moderate relevance
-- 🔴 **LOW** (<0.4): Weak match or uncertain
+After hybrid retrieval returns 10 candidates, a **cross-encoder** (`ms-marco-MiniLM-L-6-v2`) scores each (question, chunk) pair jointly, keeping the top 5 most relevant chunks for the LLM.
 
 ### 4. Prompt Engineering
 
-Financial domain-specific prompt with **strict guardrails**:
+Financial domain-specific prompt with strict guardrails:
 - ✅ Answer ONLY from provided context
-- ✅ Cite page numbers
+- ✅ Cite page/source references
 - ✅ Explain financial terms simply
 - ❌ NEVER give investment advice
 - ❌ NEVER use general knowledge
@@ -164,100 +233,103 @@ Financial domain-specific prompt with **strict guardrails**:
 
 ```
 sid-chatbot/
-├── app.py                      # Streamlit frontend
+├── app.py                          # Streamlit frontend (fund selector + chat)
 ├── src/
-│   ├── config.py              # Configuration (API keys, models, params)
-│   ├── pdf_parser.py          # PDF parsing (PyMuPDF + pdfplumber)
-│   ├── chunker.py             # Text chunking strategy
-│   ├── embeddings.py          # Vector embeddings + FAISS
-│   ├── hybrid_retriever.py    # BM25 + FAISS hybrid search
-│   ├── reranker.py            # Cross-encoder re-ranking
-│   └── rag_chain.py           # RAG pipeline orchestration
+│   ├── config.py                   # All config: API keys, models, AMC list
+│   ├── database.py                 # SQLite database schema + query helpers
+│   ├── pdf_parser.py               # PDF parsing (PyMuPDF + pdfplumber)
+│   ├── chunker.py                  # Text chunking strategy
+│   ├── embeddings.py               # Vector embeddings + FAISS operations
+│   ├── hybrid_retriever.py         # BM25 + FAISS hybrid search
+│   ├── reranker.py                 # Cross-encoder re-ranking
+│   └── rag_chain.py                # RAG pipeline (Groq + Llama 3.3 70B)
+├── scripts/
+│   ├── scrape_nav.py               # Fetch NAV data from AMFI (14K+ funds)
+│   ├── scrape_scheme_details.py    # Enrich funds via mfapi.in API
+│   └── ingest_funds.py             # Build FAISS vector store
 ├── data/
-│   └── sample/                # Sample SID PDFs
+│   ├── funds.db                    # SQLite database (auto-created)
+│   ├── fund_texts/                 # Enriched fund text files (auto-created)
+│   ├── sids/                       # Optional: manually placed SID PDFs
+│   └── sample/                     # Sample SID PDFs
+├── vectorstore/                    # FAISS index (auto-created)
 ├── evaluation/
-│   └── test_questions.json    # Test dataset for evaluation
-├── requirements.txt           # Python dependencies
-├── .env.example               # Environment variables template
-├── .gitignore                 # Git ignore rules
-└── README.md                  # This file
+│   └── test_questions.json         # Test dataset
+├── requirements.txt                # Python dependencies
+├── .env                            # API keys (not committed)
+├── Dockerfile                      # Docker container config
+├── docker-compose.yml              # Docker compose setup
+└── README.md                       # This file
 ```
 
 ---
 
-## 🧪 Testing & Evaluation
+## 🧪 Testing
 
-### Manual Testing
+### Quick Test
 
-Upload a SID and try these questions:
+```bash
+# Verify data pipeline
+python -m scripts.scrape_nav                                    # Should show 14K+ funds
+python -m scripts.scrape_scheme_details --limit 10 --delay 0.3  # Should enrich 10
+python -m scripts.ingest_funds --texts-only                     # Should build FAISS
+```
+
+### Sample Questions
 
 | Question | Expected Confidence | Tests |
 |----------|-------------------|-------|
-| "What is the exit load?" | 🟢 HIGH | Exact keyword match |
-| "What are redemption charges?" | 🟢 HIGH | Semantic similarity |
-| "Fund manager experience?" | 🟡 MEDIUM | Multi-chunk synthesis |
-| "Compare with XYZ fund" | 🔴 LOW | Not in document |
-
-### Test Dataset
-
-10 curated Q&A pairs in `evaluation/test_questions.json`:
-- Investment objective
-- Exit load
-- Risk factors
-- Fund manager
-- Expense ratio
-- Minimum investment
-- NAV calculation
-- Lock-in period
-- Benchmark index
-- Asset allocation
+| "What is the NAV?" | 🟢 HIGH | Direct data match |
+| "What are the 1-year returns?" | 🟢 HIGH | Calculated returns |
+| "What category is this fund?" | 🟢 HIGH | Metadata retrieval |
+| "Who is the fund manager?" | 🟡 MEDIUM | May not be in scraped data |
+| "Compare with XYZ fund" | 🔴 LOW | Cross-fund query |
 
 ---
 
-## 🛠️ Deployment Options
+## 🛠️ Configuration
 
-### Option 1: Local Development (Current)
-✅ Free, private, works offline  
-❌ Not accessible online
+All settings in `src/config.py`:
 
-### Option 2: Docker (Recommended for Sharing)
-```bash
-# Create Dockerfile
-docker build -t sid-chatbot .
-docker run -p 8501:8501 sid-chatbot
+```python
+# LLM
+LLM_MODEL = "llama-3.3-70b-versatile"   # Groq model
+LLM_TEMPERATURE = 0.1                    # Low = more factual
+
+# Embeddings
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"     # Local, no API needed
+
+# Retrieval
+TOP_K = 5                                # Chunks per query
+CHUNK_SIZE = 1000                        # Characters per chunk
+CHUNK_OVERLAP = 200                      # Overlap between chunks
+
+# Data
+AMFI_NAV_URL = "https://www.amfiindia.com/spages/NAVAll.txt"
+MFAPI_BASE_URL = "https://api.mfapi.in/mf"
 ```
-✅ Reproducible, shareable  
-❌ Requires Docker knowledge
 
-### Option 3: Cloud (VPS/AWS)
-Deploy Ollama-compatible container to VPS  
-✅ Publicly accessible  
-❌ Costs ~$20-50/month
+### Switching LLM Providers
 
-### Option 4: Streamlit Cloud (API-based)
-Switch Ollama → Groq/Gemini API, deploy for free  
-✅ Free, easy deployment  
-❌ API costs, not 100% private
+The project supports multiple LLM providers. Update `rag_chain.py`:
+
+| Provider | Model | Pros |
+|----------|-------|------|
+| **Groq** (current) | Llama 3.3 70B | Free, ultra-fast |
+| **Google Gemini** | gemini-2.0-flash | Free tier, multimodal |
+| **Ollama** | qwen2.5 | 100% local, private |
 
 ---
 
 ## 🎯 Future Enhancements
 
-- [ ] **Multi-fund comparison**: Compare metrics across funds
-- [ ] **Caching**: Store repeat queries for instant answers
-- [ ] **RAGAS evaluation**: Automated accuracy measurement
-- [ ] **Risk detection**: Highlight high-risk indicators
-- [ ] **Export summaries**: PDF/DOCX report generation
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Areas of interest:
-- Improving chunking strategies
-- Testing on different document types
-- Adding more evaluation metrics
-- UI/UX enhancements
+- [ ] **Multi-fund comparison** — Compare returns across funds side-by-side
+- [ ] **Automated fund report card** — One-page summary per fund
+- [ ] **NFO monitoring** — Auto-detect and ingest new fund offers
+- [ ] **SID PDF auto-download** — Selenium-based scraper for AMC websites
+- [ ] **RAGAS evaluation** — Automated accuracy measurement
+- [ ] **Export summaries** — PDF/DOCX report generation
+- [ ] **Caching** — Store repeat queries for instant answers
 
 ---
 
@@ -276,17 +348,13 @@ MIT License — Free to use and modify
 
 ## 🙏 Acknowledgments
 
-- **LangChain**: RAG framework
-- **Meta AI**: FAISS vector search
-- **Ollama**: Local LLM serving
-- **HuggingFace**: Embedding & re-ranking models
-- **Streamlit**: Frontend framework
-
----
-
-## 📊 Star History
-
-⭐ Star this repo if you found it helpful!
+- **AMFI India** — Official NAV data source
+- **mfapi.in** — Free mutual fund API
+- **Groq** — Ultra-fast LLM inference
+- **LangChain** — RAG framework
+- **Meta AI** — FAISS vector search
+- **HuggingFace** — Embedding & re-ranking models
+- **Streamlit** — Frontend framework
 
 ---
 

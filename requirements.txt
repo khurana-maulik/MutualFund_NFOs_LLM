@@ -24,3 +24,6 @@ sentence-transformers  # For local embeddings + cross-encoder re-ranking
 
 # Google AI
 google-generativeai
+
+# Scraping / HTTP
+requests

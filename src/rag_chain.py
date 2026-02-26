@@ -5,16 +5,16 @@ HOW RAG WORKS (simple explanation):
   1. User asks a question
   2. We search the FAISS vector database for the 5 most relevant chunks
   3. We format the chunks + question into a prompt
-  4. Ollama (local LLM) generates an answer using ONLY the provided chunks
+  4. Groq (cloud LLM) generates an answer using ONLY the provided chunks
   5. We return the answer + source citations
 
-Uses Ollama with qwen2.5 model running locally on your machine.
+Uses Groq API with Llama 3.3 70B (ultra-fast, free tier).
 """
 
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
-from src.config import TOP_K
+from src.config import TOP_K, LLM_MODEL, LLM_TEMPERATURE, GROQ_API_KEY
 
 
 # ── System Prompt ─────────────────────────────────────────────────────
@@ -42,18 +42,18 @@ ANSWER (with page citations):"""
 
 def get_llm():
     """
-    Initialize Ollama with qwen2.5 model (local, runs on your laptop).
+    Initialize Groq LLM (ultra-fast cloud inference).
     
-    Why Ollama?
-      - 100% FREE: No API costs ever
-      - No quotas: Unlimited usage
-      - Private: All processing on your machine
-      - Offline: Works without internet
-      - Fast: Optimized inference
+    Why Groq?
+      - Blazing fast: Custom LPU chips, sub-second responses
+      - Free tier: 30 RPM, 14.4K tokens/min
+      - No local setup: Cloud-based
+      - Top models: Llama 3.3 70B, Mixtral, etc.
     """
-    llm = ChatOllama(
-        model="qwen2.5",
-        temperature=0.1,
+    llm = ChatGroq(
+        model=LLM_MODEL,
+        temperature=LLM_TEMPERATURE,
+        groq_api_key=GROQ_API_KEY,
     )
     return llm
 
