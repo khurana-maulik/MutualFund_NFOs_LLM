@@ -9,8 +9,10 @@ HOW RAG WORKS (simple explanation):
   5. We return the answer + source citations
 
 Uses Groq API with Llama 3.3 70B (ultra-fast, free tier).
+Includes rate limiting with exponential backoff for Groq free tier (30 RPM).
 """
 
+import time
 from langchain_groq import ChatGroq
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
@@ -40,6 +42,15 @@ QUESTION: {question}
 ANSWER (with page citations):"""
 
 
+def validate_api_keys():
+    """Check that required API keys are configured."""
+    if not GROQ_API_KEY or GROQ_API_KEY == "your_key_here":
+        raise ValueError(
+            "GROQ_API_KEY not set. Get a free key at https://console.groq.com/keys "
+            "and add it to your .env file."
+        )
+
+
 def get_llm():
     """
     Initialize Groq LLM (ultra-fast cloud inference).
@@ -50,12 +61,43 @@ def get_llm():
       - No local setup: Cloud-based
       - Top models: Llama 3.3 70B, Mixtral, etc.
     """
+    validate_api_keys()
     llm = ChatGroq(
         model=LLM_MODEL,
         temperature=LLM_TEMPERATURE,
         groq_api_key=GROQ_API_KEY,
     )
     return llm
+
+
+def invoke_with_retry(llm, prompt: str, max_retries: int = 3) -> str:
+    """
+    Invoke LLM with exponential backoff for rate limiting.
+    
+    Groq free tier: 30 requests/min, 14.4K tokens/min.
+    On 429 (rate limit), waits 2s, 4s, 8s before retrying.
+    """
+    for attempt in range(max_retries):
+        try:
+            response = llm.invoke(prompt)
+            return response
+        except Exception as e:
+            error_str = str(e).lower()
+            if "429" in str(e) or "rate_limit" in error_str or "rate limit" in error_str:
+                wait_time = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+                print(f"   Rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+            elif "authentication" in error_str or "api_key" in error_str or "401" in str(e):
+                raise ValueError(
+                    "Invalid GROQ_API_KEY. Please check your API key at "
+                    "https://console.groq.com/keys and update .env"
+                ) from e
+            else:
+                raise  # Unknown error, don't retry
+    raise Exception(
+        "Groq API rate limit exceeded. The free tier allows 30 requests/minute. "
+        "Please wait a moment and try again."
+    )
 
 
 class RAGChain:
@@ -124,8 +166,8 @@ class RAGChain:
             question=question,
         )
         
-        # Step 5: Get answer from Ollama
-        response = self.llm.invoke(formatted_prompt)
+        # Step 5: Get answer from Groq (with rate limiting)
+        response = invoke_with_retry(self.llm, formatted_prompt)
         
         # Step 6: Extract source information (with re-ranker scores)
         sources = []

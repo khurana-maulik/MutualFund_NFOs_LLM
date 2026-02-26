@@ -1,8 +1,8 @@
 """
-SID Chatbot — Streamlit Frontend (Phase 3)
+SID Chatbot — Streamlit Frontend (Phase 4)
 ===========================================
-Pre-loaded mutual fund database with fund selector.
-No more PDF uploads — data is scraped from AMFI and stored in advance.
+Pre-loaded mutual fund database with fund selector + global search.
+Enhanced with: auto-detect fund, data freshness, rate limit handling.
 
 Run with:  streamlit run app.py
 """
@@ -10,7 +10,11 @@ Run with:  streamlit run app.py
 import streamlit as st
 import os
 
-from src.database import init_database, get_all_amcs, get_funds_by_amc, get_fund_by_code, get_fund_count
+from src.database import (
+    init_database, get_all_amcs, get_funds_by_amc,
+    get_fund_by_code, get_fund_count, search_funds_global,
+    get_data_freshness, get_enriched_fund_count,
+)
 from src.rag_chain import build_rag_chain, ask_question
 
 
@@ -86,6 +90,11 @@ st.markdown("""
         padding: 12px;
         margin: 10px 0;
     }
+
+    /* Freshness indicator */
+    .freshness-good { color: #4CAF50; }
+    .freshness-stale { color: #FF9800; }
+    .freshness-old { color: #f44336; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,12 +109,20 @@ if "selected_fund_code" not in st.session_state:
 if "selected_fund_name" not in st.session_state:
     st.session_state.selected_fund_name = ""
 if "db_initialized" not in st.session_state:
-    init_database()
-    st.session_state.db_initialized = True
+    try:
+        init_database()
+        st.session_state.db_initialized = True
+    except Exception as e:
+        st.error(f"Database initialization failed: {e}")
+        st.stop()
 
 
 # ── Check if data exists ──────────────────────────────────────────────
-fund_count = get_fund_count()
+try:
+    fund_count = get_fund_count()
+except Exception:
+    fund_count = 0
+
 vectorstore_exists = os.path.exists("vectorstore/index.faiss")
 
 
@@ -116,36 +133,68 @@ with st.sidebar:
     if fund_count == 0:
         st.warning("⚠️ No fund data found! Run the setup commands:")
         st.code("""
-# Step 1: Scrape NAV data (~20K funds)
+# Step 1: Scrape NAV data (~14K funds)
 python -m scripts.scrape_nav
 
-# Step 2: Enrich with details (top 100 first)
-python -m scripts.scrape_scheme_details --limit 100
+# Step 2: Enrich with details (top 500)
+python -m scripts.scrape_scheme_details --limit 500
 
 # Step 3: Build vector store
-python -m scripts.ingest_funds
+python -m scripts.ingest_funds --texts-only
         """, language="bash")
         st.stop()
 
-    # AMC Selector
+    # ── Global Fund Search ────────────────────────────────────────────
+    st.markdown("#### 🔍 Quick Search")
+    search_query = st.text_input(
+        "Search any fund by name",
+        placeholder="e.g. HDFC Flexi Cap, Midcap, SBI...",
+        help="Search across all 14K+ funds by name, AMC, or category",
+        key="global_search"
+    )
+
+    if search_query and len(search_query) >= 2:
+        search_results = search_funds_global(search_query, limit=15)
+        if search_results:
+            search_options = {
+                f"{r['scheme_name'][:60]} ({r['fund_house'][:20]})": r['scheme_code']
+                for r in search_results
+            }
+            selected_search = st.selectbox(
+                f"Found {len(search_results)} funds:",
+                options=list(search_options.keys()),
+                key="search_results_select"
+            )
+            if selected_search:
+                code = search_options[selected_search]
+                if code != st.session_state.selected_fund_code:
+                    st.session_state.selected_fund_code = code
+                    st.session_state.selected_fund_name = selected_search.split(" (")[0]
+                    st.session_state.chat_history = []
+                    st.session_state.rag_chain = None
+        else:
+            st.caption("No funds found for this search.")
+
+    st.divider()
+
+    # ── AMC + Fund Dropdown ───────────────────────────────────────────
+    st.markdown("#### 📊 Browse by AMC")
     amcs = get_all_amcs()
     if not amcs:
         st.error("No AMCs found in database.")
         st.stop()
 
     selected_amc = st.selectbox(
-        "📊 Select Fund House (AMC)",
+        "Select Fund House (AMC)",
         options=amcs,
         index=0,
         help="Choose an Asset Management Company"
     )
 
-    # Fund Selector (filtered by AMC)
     if selected_amc:
         funds = get_funds_by_amc(selected_amc)
 
         if funds:
-            # Create display options
             fund_options = {
                 f"{f['scheme_name']}": f['scheme_code']
                 for f in funds
@@ -160,21 +209,44 @@ python -m scripts.ingest_funds
             if selected_fund_name:
                 selected_code = fund_options[selected_fund_name]
 
-                # If fund changed, reset chat and reload RAG
                 if selected_code != st.session_state.selected_fund_code:
                     st.session_state.selected_fund_code = selected_code
                     st.session_state.selected_fund_name = selected_fund_name
                     st.session_state.chat_history = []
-                    st.session_state.rag_chain = None  # Force reload
+                    st.session_state.rag_chain = None
         else:
             st.info(f"No active funds found for {selected_amc}")
 
     st.divider()
 
-    # Database stats
+    # ── Database Stats + Data Freshness ───────────────────────────────
     st.markdown("### 📈 Database Stats")
-    st.metric("Total Funds", f"{fund_count:,}")
-    st.metric("AMCs Tracked", f"{len(amcs)}")
+
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.metric("Total Funds", f"{fund_count:,}")
+    with col_s2:
+        st.metric("AMCs Tracked", f"{len(amcs)}")
+
+    # Data freshness
+    try:
+        freshness = get_data_freshness()
+        enriched = get_enriched_fund_count()
+
+        col_s3, col_s4 = st.columns(2)
+        with col_s3:
+            st.metric("Enriched", f"{enriched:,}")
+        with col_s4:
+            st.metric("With Managers", f"{freshness['funds_with_managers']:,}")
+
+        nav_date = freshness.get("latest_nav_date", "Unknown")
+        if nav_date and nav_date != "Unknown":
+            st.caption(f"📅 NAV Data: {nav_date}")
+        else:
+            st.caption("📅 NAV Data: Not available")
+    except Exception:
+        pass
+
     st.metric("Vector Store", "✅ Ready" if vectorstore_exists else "❌ Not Built")
 
     st.divider()
@@ -185,18 +257,26 @@ python -m scripts.ingest_funds
     - What is the NAV?
     - What category is this fund?
     - What are the returns?
+    - Who is the fund manager?
     - Which fund house manages this?
     - What type of scheme is this?
     """)
 
     st.divider()
 
-    # Data refresh
+    # Data management
     with st.expander("🔄 Data Management"):
-        st.caption("Run these commands to update data:")
+        st.caption("Quick refresh (NAV + new funds):")
+        st.code("python -m scripts.refresh_data", language="bash")
+
+        st.caption("Full refresh (includes fund managers):")
+        st.code("python -m scripts.refresh_data --full", language="bash")
+
+        st.caption("Individual steps:")
         st.code("python -m scripts.scrape_nav", language="bash")
         st.code("python -m scripts.scrape_scheme_details --limit 500", language="bash")
-        st.code("python -m scripts.ingest_funds", language="bash")
+        st.code("python -m scripts.scrape_fund_managers --limit 5000", language="bash")
+        st.code("python -m scripts.ingest_funds --texts-only", language="bash")
 
 
 # ── Main Area ─────────────────────────────────────────────────────────
@@ -218,7 +298,8 @@ if st.session_state.selected_fund_code:
         with col3:
             st.metric("📂 Category", fund_info.get("scheme_category", "N/A")[:30])
         with col4:
-            st.metric("📊 Type", fund_info.get("scheme_type", "N/A")[:25])
+            manager = fund_info.get("fund_manager")
+            st.metric("👤 Manager", (manager[:25] + "..." if manager and len(manager) > 25 else manager) or "N/A")
 
         # Fund name banner
         st.info(f"🏦 **{fund_info.get('scheme_name', 'Unknown')}** | {fund_info.get('fund_house', 'Unknown AMC')} | Code: {fund_info.get('scheme_code', 'N/A')}")
@@ -235,22 +316,24 @@ if st.session_state.selected_fund_code:
                 vectorstore = load_vectorstore()
 
                 # Get all documents from the vectorstore for BM25
-                # We retrieve a large number to build the BM25 index
                 all_docs_with_scores = vectorstore.similarity_search_with_score("", k=1000)
                 all_docs = [doc for doc, score in all_docs_with_scores]
 
                 if not all_docs:
-                    # Fallback: create a minimal doc list
                     all_docs = [Document(page_content="placeholder", metadata={"page": 0})]
 
                 st.session_state.rag_chain = build_rag_chain(vectorstore, all_docs)
                 st.success("✅ AI model loaded and ready!")
+            except ValueError as e:
+                # API key issues
+                st.error(f"⚙️ Configuration Error: {e}")
+                st.info("Check your `.env` file and ensure `GROQ_API_KEY` is set correctly.")
             except Exception as e:
                 st.error(f"❌ Error loading model: {e}")
                 st.info("Make sure to run `python -m scripts.ingest_funds` first.")
 
     elif not vectorstore_exists:
-        st.warning("⚠️ Vector store not built yet. Run: `python -m scripts.ingest_funds`")
+        st.warning("⚠️ Vector store not built yet. Run: `python -m scripts.ingest_funds --texts-only`")
 
     # ── Chat Interface ────────────────────────────────────────────────
 
@@ -325,8 +408,26 @@ if st.session_state.selected_fund_code:
                             "confidence": confidence,
                         })
 
+                    except ValueError as e:
+                        # API key / config issues
+                        error_msg = f"⚙️ Configuration Error: {str(e)}"
+                        st.error(error_msg)
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": error_msg,
+                        })
+
                     except Exception as e:
-                        error_msg = f"❌ Error: {str(e)}"
+                        error_str = str(e)
+                        if "rate limit" in error_str.lower() or "429" in error_str:
+                            error_msg = "⏳ Rate limit reached. The free Groq tier allows 30 requests/minute. Please wait ~30 seconds and try again."
+                        elif "timeout" in error_str.lower():
+                            error_msg = "⏱️ Request timed out. The server may be busy — please try again."
+                        elif "connection" in error_str.lower():
+                            error_msg = "🌐 Network error. Please check your internet connection and try again."
+                        else:
+                            error_msg = f"❌ Error: {error_str}"
+
                         st.error(error_msg)
                         st.session_state.chat_history.append({
                             "role": "assistant",
@@ -335,3 +436,9 @@ if st.session_state.selected_fund_code:
 
 else:
     st.info("👈 Select a fund from the sidebar to start asking questions.")
+    st.markdown("""
+    **How to use:**
+    1. **Quick Search**: Type any fund name in the search box (e.g., "HDFC Flexi Cap")
+    2. **Browse**: Select an AMC, then pick a fund from the dropdown
+    3. **Ask**: Type your question in the chat box below
+    """)

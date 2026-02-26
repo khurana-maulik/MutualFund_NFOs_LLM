@@ -1,20 +1,15 @@
 """
 scrape_fund_managers.py — Build rich fund manager profiles from Groww.
 
-This is what makes this platform DIFFERENT from Groww/Moneycontrol:
-Instead of just showing fund manager names, we build detailed text profiles
-with investing style, education, experience, and fund track records —
-then store them in a vector DB so users can ask natural language questions
-like "Which managers follow a value investing approach?" or
-"What is Roshi Jain's experience with midcap stocks?"
+FIXED VERSION (v2): Uses Groww v3 search API for slug discovery + page
+scraping for manager details. The v1 search API was broken (returned
+Edelweiss results for every query).
 
-Groww's __NEXT_DATA__ contains:
-  - fund_manager_details[].person_name
-  - fund_manager_details[].education
-  - fund_manager_details[].experience
-  - fund_manager_details[].funds_managed[{scheme_name, scheme_code}]
-  - fund_manager (primary manager string)
-  - scheme_category, investment_objective (for style analysis)
+Pipeline:
+  1. v3 search API → get correct Groww slug + validate AMC from title
+  2. Fetch Groww fund page → extract fund_manager from __NEXT_DATA__
+  3. Validate AMC from page data before assigning
+  4. Optionally build rich profiles (education, experience) with AI
 
 Run:  python -m scripts.scrape_fund_managers --limit 5000
 """
@@ -42,10 +37,51 @@ SEARCH_HEADERS = {
 }
 
 
+# ── AMC name normalization ────────────────────────────────────────────
+AMC_KEYWORDS = {
+    "SBI Mutual Fund": ["sbi"],
+    "ICICI Prudential Mutual Fund": ["icici"],
+    "HDFC Mutual Fund": ["hdfc"],
+    "Nippon India Mutual Fund": ["nippon"],
+    "Kotak Mahindra Mutual Fund": ["kotak"],
+    "Aditya Birla Sun Life Mutual Fund": ["aditya", "birla"],
+    "UTI Mutual Fund": ["uti"],
+    "Axis Mutual Fund": ["axis"],
+    "Mirae Asset Mutual Fund": ["mirae"],
+    "DSP Mutual Fund": ["dsp"],
+    "Franklin Templeton Mutual Fund": ["franklin"],
+    "Tata Mutual Fund": ["tata"],
+    "Bandhan Mutual Fund": ["bandhan"],
+    "Motilal Oswal Mutual Fund": ["motilal"],
+    "Edelweiss Mutual Fund": ["edelweiss"],
+    "Canara Robeco Mutual Fund": ["canara"],
+    "HSBC Mutual Fund": ["hsbc"],
+    "Baroda BNP Paribas Mutual Fund": ["baroda", "bnp"],
+    "LIC Mutual Fund": ["lic"],
+    "360 ONE Mutual Fund": ["360 one", "iifl one", "iifl mutual", "iifl"],
+    "Bajaj Finserv Mutual Fund": ["bajaj"],
+    "Navi Mutual Fund": ["navi"],
+    "Quant Mutual Fund": ["quant"],
+    "PPFAS Mutual Fund": ["ppfas", "parag parikh"],
+    "JM Financial Mutual Fund": ["jm financial"],
+    "Union Mutual Fund": ["union"],
+    "Sundaram Mutual Fund": ["sundaram"],
+    "Mahindra Manulife Mutual Fund": ["mahindra"],
+    "IIFL Mutual Fund": ["iifl"],
+    "WhiteOak Capital Mutual Fund": ["whiteoak"],
+    "Trust Mutual Fund": ["trust"],
+    "Invesco Mutual Fund": ["invesco"],
+    "PGIM India Mutual Fund": ["pgim"],
+    "Shriram Mutual Fund": ["shriram"],
+    "Groww Mutual Fund": ["groww"],
+    "Helios Mutual Fund": ["helios"],
+}
+
+
 LLM = None
 
 def get_ai_style_summary(name: str, education: str, experience: str, funds: list[str]) -> str:
-    """Use Groq LLM to generate a detailed investing style summary based on the manager's profile."""
+    """Use Groq LLM to generate a detailed investing style summary."""
     global LLM
     if LLM is None:
         try:
@@ -69,11 +105,11 @@ Write ONLY the summary paragraph. No introductory text."""
             return response.content.strip()
         except Exception as e:
             if "429" in str(e) or "rate limit" in str(e).lower():
-                time.sleep(4)  # Wait if rate limited
+                time.sleep(4)
             else:
-                return f"Experienced fund manager holding expertise in {', '.join(funds[:3])}."
-    
-    return "Diversified mutual fund management approach based on their portfolio of funds."
+                return f"Experienced fund manager with expertise in {', '.join(funds[:3])}."
+
+    return "Diversified mutual fund management approach."
 
 
 def get_funds_needing_managers(limit: int = 5000) -> list[dict]:
@@ -93,34 +129,73 @@ def get_funds_needing_managers(limit: int = 5000) -> list[dict]:
         return [dict(row) for row in rows]
 
 
-def find_groww_slug(scheme_name: str) -> str | None:
-    """Find the Groww URL slug using their search API."""
-    search_term = scheme_name.split(" - ")[0].strip()
-    search_term = search_term.replace("  ", " ")
+def validate_amc_from_title(fund_house: str, groww_title: str) -> bool:
+    """Validate that a Groww search result title matches the expected AMC."""
+    title_lower = groww_title.lower()
 
-    url = f"https://groww.in/v1/api/search/v1/derived/scheme?q={search_term}&page=0&size=5"
+    # Check against known AMC keywords
+    keywords = AMC_KEYWORDS.get(fund_house, [])
+    if keywords:
+        return any(kw in title_lower for kw in keywords)
+
+    # Fallback: first significant word of AMC name must appear in title
+    for word in fund_house.split():
+        word_lower = word.lower()
+        if len(word_lower) > 2 and word_lower not in ("mutual", "fund", "india"):
+            return word_lower in title_lower
+
+    return False
+
+
+def find_groww_slug_v3(scheme_name: str, fund_house: str) -> str | None:
+    """
+    Find the Groww URL slug using the v3 global search API.
+    
+    The v1 search API is broken (returns Edelweiss for everything).
+    The v3 API returns correct results with proper slug IDs.
+    """
+    search_term = scheme_name.split(" - ")[0].strip().replace("  ", " ")
+
+    url = (
+        f"https://groww.in/v1/api/search/v3/query/global/st_query"
+        f"?page=0&query={requests.utils.quote(search_term)}&size=10&web=true"
+    )
     try:
         r = requests.get(url, headers=SEARCH_HEADERS, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            results = data.get("content", [])
-            if results:
-                name_lower = scheme_name.lower()
-                for result in results:
-                    search_id = result.get("direct_search_id") or result.get("search_id") or result.get("id", "")
-                    result_name = (result.get("scheme_name") or "").lower()
-                    base_search = search_term.lower()
-                    if base_search in result_name or result_name in base_search:
-                        return search_id
-                first = results[0]
-                return first.get("direct_search_id") or first.get("search_id") or first.get("id")
+        if r.status_code != 200:
+            return None
+
+        data = r.json()
+        results = data.get("data", {}).get("content", [])
+        if not results:
+            return None
+
+        # Find first result that:
+        # 1. Is a Scheme (not ETF/Stock)
+        # 2. Matches our AMC
+        for result in results:
+            entity_type = result.get("sub_entity_type") or result.get("entity_type", "")
+            if entity_type not in ("Scheme", "Nfo"):
+                continue
+
+            title = result.get("title", "")
+            if validate_amc_from_title(fund_house, title):
+                slug = result.get("search_id") or result.get("id")
+                if slug:
+                    # Remove "nfo-" prefix if present
+                    if slug.startswith("nfo-"):
+                        slug = slug[4:]
+                    return slug
+
+        # NO fallback — return None if no AMC match
+        return None
+
     except (requests.RequestException, json.JSONDecodeError):
-        pass
-    return None
+        return None
 
 
 def fetch_groww_page_data(slug: str) -> dict | None:
-    """Fetch and parse Groww fund page __NEXT_DATA__."""
+    """Fetch and parse Groww fund page __NEXT_DATA__ for manager details."""
     url = f"https://groww.in/mutual-funds/{slug}"
     try:
         r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
@@ -134,13 +209,8 @@ def fetch_groww_page_data(slug: str) -> dict | None:
     return None
 
 
-def extract_manager_profiles(server_data: dict) -> list[dict]:
-    """
-    Extract detailed fund manager profiles from Groww server data.
-
-    Returns list of dicts with keys:
-      - name, education, experience, funds_managed, categories
-    """
+def extract_manager_info(server_data: dict) -> list[dict]:
+    """Extract manager name(s) and detailed profiles from Groww page data."""
     profiles = []
     manager_details = server_data.get("fund_manager_details", [])
 
@@ -149,43 +219,22 @@ def extract_manager_profiles(server_data: dict) -> list[dict]:
         if not name:
             continue
 
-        education = mgr.get("education", "").strip()
-        experience = mgr.get("experience", "").strip()
-
-        # Extract funds managed
-        funds_managed = []
-        categories = []
-        for fund in mgr.get("funds_managed", []):
-            fund_name = fund.get("scheme_name", "")
-            if fund_name:
-                funds_managed.append(fund_name)
-
-        # Get the scheme category for style inference
-        cat = server_data.get("scheme_category", "")
-        sub_cat = server_data.get("sub_category", "")
-        if cat:
-            categories.append(cat)
-        if sub_cat:
-            categories.append(sub_cat)
-
         profiles.append({
             "name": name,
-            "education": education,
-            "experience": experience,
-            "funds_managed": funds_managed,
-            "categories": categories,
+            "education": (mgr.get("education") or "").strip(),
+            "experience": (mgr.get("experience") or "").strip(),
+            "funds_managed": [f.get("scheme_name", "") for f in mgr.get("funds_managed", []) if f.get("scheme_name")],
             "fund_house": server_data.get("fund_house", ""),
             "date_from": mgr.get("date_from", ""),
         })
 
-    # Fallback to primary fund_manager field
+    # Fallback to primary fund_manager string
     if not profiles and server_data.get("fund_manager"):
         profiles.append({
             "name": server_data["fund_manager"].strip(),
             "education": "",
             "experience": "",
             "funds_managed": [],
-            "categories": [server_data.get("scheme_category", "")],
             "fund_house": server_data.get("fund_house", ""),
             "date_from": "",
         })
@@ -194,19 +243,14 @@ def extract_manager_profiles(server_data: dict) -> list[dict]:
 
 
 def build_manager_profile_text(profile: dict, scheme_name: str) -> str:
-    """
-    Build a rich text profile for a fund manager.
-    This is the KEY differentiator — enables RAG questions about investing style.
-    """
+    """Build a rich text profile for a fund manager."""
     name = profile["name"]
     education = profile["education"]
     experience = profile["experience"]
     funds = profile["funds_managed"]
     fund_house = profile["fund_house"]
-    categories = profile["categories"]
 
-    # Generate rich investing style using AI
-    print(f"      🤖 Generating AI investing style for {name}...")
+    print(f"      Generating AI investing style for {name}...")
     style = get_ai_style_summary(name, education, experience, funds if funds else [scheme_name])
 
     text = f"""FUND MANAGER PROFILE
@@ -226,20 +270,18 @@ INVESTING STYLE & APPROACH:
 
 FUNDS MANAGED BY {name.upper()}:
 """
-
     if funds:
-        for f in funds[:15]:  # Limit to 15 funds
+        for f in funds[:15]:
             text += f"  - {f}\n"
     else:
         text += f"  - {scheme_name}\n"
 
     text += f"\nTotal funds managed: {len(funds) if funds else 1}\n"
-
     return text.strip()
 
 
-# ── Seen manager tracker (avoid duplicate profiles) ───────────────────
-seen_managers = {}  # name -> profile_text
+# Track managers already profiled
+seen_managers = {}
 
 
 def update_fund_manager_db(scheme_code: int, managers: list[str]):
@@ -267,11 +309,7 @@ def update_fund_text_file(scheme_code: int, manager_names: list[str],
     manager_str = ", ".join(manager_names)
 
     if "FUND MANAGER:" in content:
-        content = re.sub(
-            r'FUND MANAGER:.*?\n',
-            f'FUND MANAGER: {manager_str}\n',
-            content
-        )
+        content = re.sub(r'FUND MANAGER:.*?\n', f'FUND MANAGER: {manager_str}\n', content)
     else:
         content = content.replace(
             "\n\nCURRENT NAV:",
@@ -289,33 +327,32 @@ def save_manager_profile(manager_name: str, profile_text: str,
     safe_name = re.sub(r'[^a-zA-Z0-9 ]', '', manager_name).strip().replace(' ', '_').lower()
     filepath = os.path.join(output_dir, f"{safe_name}.txt")
 
-    # If profile already exists, append new fund info
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8") as f:
             existing = f.read()
-        # Don't overwrite if already has richer content
         if len(profile_text) <= len(existing):
             return filepath
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(profile_text)
-
     return filepath
 
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Scrape rich fund manager profiles from Groww")
+    parser = argparse.ArgumentParser(description="Scrape fund manager profiles from Groww (v2 - fixed)")
     parser.add_argument("--limit", type=int, default=5000,
-                        help="Max number of funds to process (default: 5000)")
+                        help="Max funds to process (default: 5000)")
     parser.add_argument("--delay", type=float, default=1.5,
                         help="Delay between page requests (default: 1.5)")
+    parser.add_argument("--skip-profiles", action="store_true",
+                        help="Skip rich profile generation (faster, managers only)")
     args = parser.parse_args()
 
     start = time.time()
 
     print("=" * 60)
-    print("Fund Manager Profile Builder - Groww")
+    print("Fund Manager Scraper v2 (Fixed - v3 Search + AMC Validation)")
     print("=" * 60)
 
     init_database()
@@ -331,79 +368,87 @@ def main():
     profiles_saved = 0
     unique_managers = set()
     not_found = 0
+    page_errors = 0
 
-    # Group funds by base name to avoid redundant Groww fetches
-    # (e.g., HDFC Flexi Cap Direct Growth + HDFC Flexi Cap Regular Growth share managers)
-    processed_slugs = {}
+    # Cache: slug -> page server_data (avoid re-fetching same page)
+    slug_cache = {}
 
     for i, fund in enumerate(funds, 1):
         code = fund["scheme_code"]
         name = fund["scheme_name"]
+        fund_house = fund["fund_house"] or ""
 
         print(f"\n[{i}/{len(funds)}] {name}")
 
-        # Step 1: Find Groww slug
-        slug = find_groww_slug(name)
+        # Step 1: Find correct Groww slug via v3 search
+        slug = find_groww_slug_v3(name, fund_house)
         if not slug:
             not_found += 1
-            print(f"   -> Groww slug not found")
+            print(f"   -> No matching fund on Groww")
+            time.sleep(0.3)
             continue
 
-        # Step 2: Check if we already fetched this slug's page
-        if slug in processed_slugs:
-            # Reuse cached profiles
-            profiles = processed_slugs[slug]
+        # Step 2: Fetch page data (with caching)
+        if slug in slug_cache:
+            server_data = slug_cache[slug]
         else:
-            # Fetch page data
             server_data = fetch_groww_page_data(slug)
-            if not server_data:
-                not_found += 1
-                print(f"   -> Page fetch failed")
-                processed_slugs[slug] = []
-                time.sleep(args.delay)
-                continue
-
-            profiles = extract_manager_profiles(server_data)
-            processed_slugs[slug] = profiles
+            slug_cache[slug] = server_data
             time.sleep(args.delay)
 
-        if not profiles:
+        if not server_data:
+            page_errors += 1
+            print(f"   -> Page fetch failed for slug: {slug}")
+            continue
+
+        # Step 3: Validate AMC from page data
+        page_fund_house = server_data.get("fund_house", "")
+        if not validate_amc_from_title(fund_house, page_fund_house):
+            not_found += 1
+            print(f"   -> AMC mismatch: expected '{fund_house}', got '{page_fund_house}'")
+            continue
+
+        # Step 4: Extract manager info
+        manager_profiles = extract_manager_info(server_data)
+        if not manager_profiles:
             not_found += 1
             print(f"   -> No manager data on page")
             continue
 
-        # Step 3: Process each manager
-        manager_names = []
-        for profile in profiles:
-            manager_name = profile["name"]
-            manager_names.append(manager_name)
-            unique_managers.add(manager_name)
+        manager_names = [p["name"] for p in manager_profiles]
 
-            # Build and save rich profile text
-            if manager_name not in seen_managers:
-                profile_text = build_manager_profile_text(profile, name)
-                save_manager_profile(manager_name, profile_text)
-                seen_managers[manager_name] = True
-                profiles_saved += 1
-
-        # Step 4: Update database and fund text file
+        # Step 5: Update database + text files
         update_fund_manager_db(code, manager_names)
         update_fund_text_file(code, manager_names)
         managers_found += 1
 
+        for m in manager_names:
+            unique_managers.add(m)
+
         mgr_str = ", ".join(manager_names)
         print(f"   -> {mgr_str}")
+
+        # Step 6: Build rich profiles for new managers
+        if not args.skip_profiles:
+            for profile in manager_profiles:
+                pname = profile["name"]
+                if pname not in seen_managers:
+                    profile_text = build_manager_profile_text(profile, name)
+                    save_manager_profile(pname, profile_text)
+                    seen_managers[pname] = True
+                    profiles_saved += 1
 
     elapsed = time.time() - start
     print(f"\n{'=' * 60}")
     print(f"Results:")
     print(f"  Funds with managers found: {managers_found}")
     print(f"  Funds not found on Groww:  {not_found}")
-    print(f"  Unique managers profiled:  {len(unique_managers)}")
-    print(f"  Profile texts saved:       {profiles_saved}")
+    print(f"  Page fetch errors:         {page_errors}")
+    print(f"  Unique managers found:     {len(unique_managers)}")
+    if not args.skip_profiles:
+        print(f"  Profile texts saved:       {profiles_saved}")
     print(f"  Time: {elapsed:.1f} seconds")
-    print(f"\nProfiles saved to: data/manager_profiles/")
-    print(f"Run 'python -m scripts.ingest_funds' to rebuild the vector store")
+    print(f"\nRun 'python -m scripts.ingest_funds' to rebuild the vector store")
 
 
 if __name__ == "__main__":

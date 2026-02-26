@@ -75,7 +75,7 @@ def init_database():
         """)
 
         conn.commit()
-        print("✅ Database initialized at", DATABASE_PATH)
+        print("[OK] Database initialized at", DATABASE_PATH)
 
 
 @contextmanager
@@ -160,3 +160,43 @@ def get_enriched_fund_count() -> int:
             "SELECT COUNT(*) as cnt FROM fund_details"
         ).fetchone()
         return row["cnt"]
+
+
+def search_funds_global(query: str, limit: int = 20) -> list[dict]:
+    """
+    Global search across all funds by name, category, or fund house.
+    Searches scheme_name, fund_house, and scheme_category.
+    Returns funds with all relevant details.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT f.scheme_code, f.scheme_name, f.fund_house,
+                      f.scheme_category, f.net_asset_value, f.nav_date,
+                      fd.fund_manager
+               FROM funds f
+               LEFT JOIN fund_details fd ON f.scheme_code = fd.scheme_code
+               WHERE f.is_active = 1
+                 AND (f.scheme_name LIKE ? OR f.fund_house LIKE ? OR f.scheme_category LIKE ?)
+               ORDER BY f.scheme_name
+               LIMIT ?""",
+            (f"%{query}%", f"%{query}%", f"%{query}%", limit)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_data_freshness() -> dict:
+    """
+    Get data freshness info: latest NAV date and last update time.
+    Returns dict with 'latest_nav_date' and 'funds_with_managers'.
+    """
+    with get_connection() as conn:
+        nav_row = conn.execute(
+            "SELECT MAX(nav_date) as latest FROM funds WHERE is_active = 1"
+        ).fetchone()
+        mgr_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM fund_details WHERE fund_manager IS NOT NULL AND fund_manager != ''"
+        ).fetchone()
+        return {
+            "latest_nav_date": nav_row["latest"] if nav_row else "Unknown",
+            "funds_with_managers": mgr_row["cnt"] if mgr_row else 0,
+        }
