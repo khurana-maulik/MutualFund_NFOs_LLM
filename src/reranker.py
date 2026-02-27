@@ -51,9 +51,9 @@ class Reranker:
         Args:
             model_name: HuggingFace cross-encoder model name
         """
-        print("🔄 Loading re-ranker model (first time downloads ~80MB)...")
+        print("[LOAD] Loading re-ranker model (first time downloads ~80MB)...")
         self.model = CrossEncoder(model_name)
-        print("   ✅ Re-ranker ready!")
+        print("   [OK] Re-ranker ready!")
     
     def rerank(
         self,

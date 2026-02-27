@@ -87,15 +87,15 @@ def parse_pdf(pdf_path: str) -> list[dict]:
     
     Returns sorted list by page number.
     """
-    print(f"📄 Parsing PDF: {pdf_path}")
+    print(f"[PDF] Parsing: {pdf_path}")
     
     # Step 1: Get narrative text
     pages = extract_text_with_pymupdf(pdf_path)
-    print(f"   ✅ Extracted text from {len(pages)} pages")
+    print(f"   [OK] Extracted text from {len(pages)} pages")
     
     # Step 2: Get tables
     tables = extract_tables_with_pdfplumber(pdf_path)
-    print(f"   ✅ Extracted {len(tables)} tables")
+    print(f"   [OK] Extracted {len(tables)} tables")
     
     # Step 3: Combine and sort by page
     all_content = pages + tables

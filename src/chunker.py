@@ -73,5 +73,5 @@ def create_chunks(parsed_pages: list[dict], source_filename: str) -> list[Docume
             )
             all_chunks.extend(splits)
     
-    print(f"   ✅ Created {len(all_chunks)} chunks from '{source_filename}'")
+    print(f"   [OK] Created {len(all_chunks)} chunks from '{source_filename}'")
     return all_chunks

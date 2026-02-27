@@ -132,7 +132,7 @@ class RAGChain:
             input_variables=["context", "question"],
         )
         self.reranker_scores = []  # Store scores for confidence calculation
-        print("   ✅ RAG chain ready with hybrid retrieval + re-ranking!")
+        print("   [OK] RAG chain ready with hybrid retrieval + re-ranking!")
     
     def ask(self, question: str) -> dict:
         """

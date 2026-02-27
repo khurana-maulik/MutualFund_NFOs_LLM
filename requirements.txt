@@ -6,6 +6,7 @@ python-dotenv
 langchain
 langchain-community
 langchain-google-genai
+langchain-groq
 langchain-text-splitters
 langchain-ollama
 
@@ -27,3 +28,7 @@ google-generativeai
 
 # Scraping / HTTP
 requests
+
+# Authentication
+bcrypt
+streamlit-google-auth

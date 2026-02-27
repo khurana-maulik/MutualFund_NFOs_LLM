@@ -36,7 +36,7 @@ def get_embedding_model() -> HuggingFaceEmbeddings:
       - Size: Downloads once (~80MB), cached after that
       - Output: 384-dimensional vectors
     """
-    print("🧠 Loading local embedding model (first time downloads ~80MB)...")
+    print("[LOAD] Loading local embedding model (first time downloads ~80MB)...")
     
     embeddings = HuggingFaceEmbeddings(
         model_name=EMBEDDING_MODEL,
@@ -44,7 +44,7 @@ def get_embedding_model() -> HuggingFaceEmbeddings:
         encode_kwargs={"normalize_embeddings": True},
     )
     
-    print("   ✅ Embedding model ready!")
+    print("   [OK] Embedding model ready!")
     return embeddings
 
 
@@ -71,7 +71,7 @@ def create_vectorstore(chunks: list[Document]) -> tuple[FAISS, list[Document]]:
     
     embeddings = get_embedding_model()
     
-    print(f"📦 Creating vector store with {len(chunks)} chunks...")
+    print(f"[BUILD] Creating vector store with {len(chunks)} chunks...")
     
     vectorstore = FAISS.from_documents(
         documents=chunks,
@@ -81,7 +81,7 @@ def create_vectorstore(chunks: list[Document]) -> tuple[FAISS, list[Document]]:
     # Save to disk so it persists between app restarts
     vectorstore.save_local(VECTORSTORE_DIR)
     
-    print(f"   ✅ Vector store created and saved to '{VECTORSTORE_DIR}/'")
+    print(f"   [OK] Vector store created and saved to '{VECTORSTORE_DIR}/'")
     return vectorstore, chunks
 
 

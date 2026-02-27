@@ -59,7 +59,7 @@ class HybridRetriever:
         tokenized_docs = [doc.page_content.lower().split() for doc in documents]
         self.bm25 = BM25Okapi(tokenized_docs)
         
-        print(f"   ✅ Hybrid retriever ready (BM25: {bm25_weight}, Semantic: {semantic_weight})")
+        print(f"   [OK] Hybrid retriever ready (BM25: {bm25_weight}, Semantic: {semantic_weight})")
     
     def retrieve(self, query: str, k: int = None) -> List[Document]:
         """
